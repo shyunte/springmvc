@@ -1,0 +1,282 @@
+Text
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+/**************************************************************************************************
+Name : up_Event_202212DKSeason3_SetApplySlotMachine
+Auth : jwson
+Date : 2022-12-14
+Desc : DK모바일 디 오리진 시즌3 오픈 프로모션 - 슬롯머신 돌리기
+
+--프로시저 테스트
+DECLARE @iReturn INT
+EXEC dbo.up_Event_202212DKSeason3_SetApplySlotMachine 1392, 'sjwan794', 1, @iReturn OUTPUT
+SELECT @iReturn
+
+--권한설정
+GRANT EXEC ON up_Event_202212DKSeason3_SetApplySlotMachine TO ibWebAP
+GRANT EXEC ON up_Event_202212DKSeason3_SetApplySlotMachine TO ibDevRw
+***************************************************************************************************/
+CREATE PROCEDURE [dbo].[up_Event_202212DKSeason3_SetApplySlotMachine]
+	  @iEventCode		INT						-- 이벤트코드(1392)
+	, @vcMemberID		VARCHAR(12)				-- 접속자ID
+	, @tiPlatform		TINYINT					-- 플랫폼구분(1:web, 2:모바일)
+	, @iReturn			INT	OUTPUT				-- 결과값 반환
+AS
+BEGIN
+	BEGIN TRY
+		SET NOCOUNT ON;
+		SET XACT_ABORT ON;
+		
+		DECLARE @dtNowDate DATETIME, @dtStartDate DATETIME, @dEndDate DATETIME
+		DECLARE @iLoop INT, @iLoopTop INT, @iRandom INT, @iProbability INT, @iWinnerCount INT, @iCountChk INT, @vcGiftName VARCHAR(50), @iPowerZoneChk INT
+		DECLARE @vcPinCode VARCHAR(30), @iGiftPinSeq INT, @vcMsgShort VARCHAR(256), @vcMsgSubject VARCHAR(1024), @vcMsgContents VARCHAR(8000)
+		DECLARE @err INT, @iReturnMsg INT, @iReferenceSeq INT
+
+		SET @dtNowDate = GETDATE()
+		SET @iLoop = 1
+		SET @iLoopTop = 0
+		SET @iRandom = 0
+		SET @iProbability = -1
+		SET @iWinnerCount = -1
+		SET @iCountChk = -1
+		SET @iPowerZoneChk = -1
+		
+		SET @iReturn = -1
+		SET @err = -1
+		SET @iReturnMsg = -1
+
+		-- 플로린 코인 잔여 개수 확인
+		SELECT @iCountChk = iCount
+		FROM dbo.tbEventEntryMemberList WITH(NOLOCK)
+		WHERE iEventCode = @iEventCode
+		AND vcMemberID = @vcMemberID
+
+		IF @iCountChk <= 1
+		BEGIN
+			SET @err = 60001
+			RAISERROR('up_Event_202212DKSeason3_SetApplySlotMachine - Already get Coupon Error', 11, 1, @err)
+		END
+
+		-- 이벤트 기간 조회
+		SELECT @dtStartDate = dtStartDate, @dEndDate = dEndDate
+		FROM dbo.tbEvent WITH(NOLOCK) 
+		WHERE iEventCode = @iEventCode
+
+		-- 이벤트 기간 확인
+		IF @dtNowDate < @dtStartDate OR @dtNowDate > @dEndDate
+		BEGIN
+			SET @err = 60002
+			RAISERROR('up_Event_202212DKSeason3_SetApplySlotMachine - Already get Coupon Error', 11, 1, @err)
+		END
+
+		-- 금일 참여 여부 확인
+		IF EXISTS ( SELECT iSeq
+					FROM dbo.tbEventApplyMemberList WITH(NOLOCK)
+					WHERE iEventCode = @iEventCode
+					AND vcMemberID = @vcMemberID
+					AND iGiftCode = 3
+					AND DATEDIFF(DAY, dtRegDate, @dtNowDate) = 0 )
+		BEGIN
+			SET @err = 60003
+			RAISERROR('up_Event_202212DKSeason3_SetApplySlotMachine - Already SlotMachine used. Error', 11, 1, @err)
+		END
+
+		-- 랜덤값 구하기
+		SET @iRandom = CONVERT(INT, RAND()*999+1);
+
+		-- 모든 경품이 소진되었으면 파워존 24시간 즉시 지급
+		IF ( SELECT SUM(iWinnerCount)
+			 FROM dbo.tbEventGift WITH(NOLOCK)
+			 WHERE iEventCode = @iEventCode
+			 AND iGiftCode <> 1 ) <= 0
+		BEGIN
+			SET @iLoop = 0
+		END
+
+		-- iGiftCode = 1 ~ 6까지 @iRandom 숫자가 확률에 해당될때 까지 반복
+		WHILE @iLoop <= 6
+		BEGIN
+
+			-- 반복 작업을 막기 위한 SET
+			-- 0이면 바로 파워존 지급으로 확률 비교할 필요 X
+			IF @iLoopTop = 3 OR @iLoop = 0
+			BEGIN
+				SET @vcGiftName = '파워존 24시간'
+				SET @iLoop = 1
+				BREAK;
+			END
+			ELSE
+			BEGIN
+				-- 확률 조회하기
+				SELECT @iProbability = iProbability				-- 확률
+					, @iWinnerCount = iWinnerCount				-- 경품 수량
+					, @vcGiftName = vcGiftName					-- 경품 이름
+				FROM dbo.tbEventGift WITH(NOLOCK)
+				WHERE iEventCode = @iEventCode
+				AND iGiftCode = @iLoop
+
+				-- 랜덤값이 확률보다 작거나 같으면
+				IF @iRandom <= @iProbability
+				BEGIN
+					-- 파워존 24시간 당첨일 경우 수량 체크X
+					IF @iLoop = 6
+					BEGIN
+						BREAK;
+					END
+					-- 경품 수량이 0보다 큰 경우
+					ELSE IF @iWinnerCount > 0
+					BEGIN
+						BREAK;
+					END
+					-- 경품 수량이 없는 경우 확률을 다시 구하고 처음부터 반복
+					ELSE
+					BEGIN
+						SET @iRandom = CONVERT(INT, RAND()*999+1)
+						SET @iLoop = 1
+						SET @iLoopTop = @iLoopTop + 1
+					END
+
+				END
+				ELSE
+				BEGIN
+					SET @iLoop = @iLoop + 1;
+				END
+			END
+		END
+
+		BEGIN TRAN
+
+			-- 플로린 코인 개수 차감
+			UPDATE dbo.tbEventEntryMemberList
+			SET iCount = iCount - 2
+			  , dtRegDate = @dtNowDate
+			WHERE iEventCode = @iEventCode
+			AND vcMemberID = @vcMemberID
+
+			IF @@ROWCOUNT < 1  OR @@ERROR <> 0
+			BEGIN 
+				SET @err = 60004
+				RAISERROR('up_Event_202212DKSeason3_SetApplySlotMachine - tbEventEntryMemberList UPDATE Error', 11, 1, @err)
+			END
+
+			-- 이벤트 참여 로그 INSERT
+			INSERT dbo.tbEventApplyMemberList (iEventCode, vcMemberID, tiUse, dtRegDate, iGiftCode, tiApplyType, tiPlatform, vcLogType, iEtc, iEtc2, vcGiftName)
+			VALUES ( @iEventCode, @vcMemberID, 1, @dtNowDate, 2, 3, @tiPlatform, @vcGiftName, @iLoop, @iRandom, 'DK모바일 디오리진 시즌3 플로린 코인 뽑기 참여')
+
+			IF @@ROWCOUNT < 1 OR @@ERROR <> 0
+			BEGIN
+				SET @err = 60005
+				RAISERROR('up_Event_202212DKSeason3_SetApplySlotMachine - tbEventApplyMemberList INSERT Error', 11, 1, @err)
+			END
+
+			-- 경품 개수 차감
+			UPDATE dbo.tbEventGift
+			SET iWinnerCount = iWinnerCount - 1
+				,dtRegDate = @dtNowDate
+			WHERE iEventCode = @iEventCode
+			AND iGiftCode = @iLoop
+
+			IF @@ROWCOUNT < 1  OR @@ERROR <> 0
+			BEGIN 
+				SET @err = 60006
+				RAISERROR('up_Event_202212DKSeason3_SetApplySlotMachine - tbEventGift UPDATE Error', 11, 1, @err)
+			END
+
+			IF @iLoop = 1
+			BEGIN
+				-- 파워존 24시간 지급
+				EXEC up_FreeTicket_AddFreeTicketForEvent @vcMemberID, 'P', 24, 'itembay', 'DK모바일 디오리진 시즌3 오픈 프로모션[1392]', @iReferenceSeq OUTPUT
+
+				IF @iReferenceSeq < 0
+				BEGIN
+					SET @err = 60007	-- 파워존 24시간 지급 실패
+					RAISERROR('up_PowerZone_AddFreeTicketForEvent EXECUTE Error', 11, 1, @err)
+				END
+
+				-- 쿠폰 지급 이력 저장
+				INSERT dbo.tbEventApplyMemberList (iEventCode, vcMemberID, tiUse, dtRegDate, iGiftCode, tiApplyType, tiPlatform, vcGiftName, iEtc) 
+				VALUES (@iEventCode, @vcMemberID, 1, @dtNowDate, 3, 3, @tiPlatform, '파워존 24시간 지급', @iLoop)
+
+				IF @@ROWCOUNT <> 1 OR @@ERROR <> 0
+				BEGIN
+					SET @err = 60008
+					RAISERROR('up_Event_202212DKSeason3_SetApplySlotMachine - tbEventApplyMemberList INSERT Error', 11, 1, @err)
+				END
+			END
+			ELSE
+			BEGIN
+
+				-- 쿠폰 카드가 1~5까지 존재하여 -1 필요
+				SET @iLoop = @iLoop - 1
+
+				-- DK모바일 디 오리진 시즌3 쿠폰 카드 핀 UPDATE
+				UPDATE TOP (1) dbo.tbEventGiftPin
+				SET vcMemberID = @vcMemberID
+				  , dtRegDate = @dtNowDate
+				  , @vcPinCode = vcPinCode
+				  , @iGiftPinSeq = iSeq
+				WHERE iEventCode = @iEventCode
+				AND vcMemberID IS NULL
+				AND iGiftCode = @iLoop
+
+				IF @@ROWCOUNT <> 1 OR @@ERROR <> 0
+				BEGIN
+					SET @err = 60009
+					RAISERROR('up_Event_202212DKSeason3_SetApplySlotMachine - tbEventGiftPin UPDATE Error', 11, 1, @err)
+				END
+
+				SET @iLoop = @iLoop + 1
+
+				-- 쿠폰 지급 이력 저장
+				INSERT dbo.tbEventApplyMemberList (iEventCode, vcMemberID, tiUse, dtRegDate, iGiftCode, tiApplyType, tiPlatform, iReferenceSeq, vcGiftName, iEtc) 
+				VALUES (@iEventCode, @vcMemberID, 1, @dtNowDate, 3, 3, @tiPlatform, @iGiftPinSeq, '거래 쿠폰 카드 지급', @iLoop)
+
+				IF @@ROWCOUNT <> 1 OR @@ERROR <> 0
+				BEGIN
+					SET @err = 60010
+					RAISERROR('up_Event_202212DKSeason3_SetApplySlotMachine - tbEventApplyMemberList INSERT Error', 11, 1, @err)
+				END
+			END
+
+		COMMIT TRAN
+
+		IF @iLoop IN (2, 3, 4, 5, 6)
+		BEGIN
+			-- 쿠폰 지급 관리자 메시지 전송
+			SET @vcMsgShort = '관리자 메세지내용'
+			SET @vcMsgSubject = '짜릿한 베이만의 시즌3를 위한 아이템 쿠폰 지급'
+			SET @vcMsgContents = '<table width="550" border="0" cellspacing="0" cellpadding="0"><tr>'
+			SET @vcMsgContents = @vcMsgContents 	+'  <td style="padding-left:5;padding-right:5;padding-top:5;padding-bottom:5">'
+			SET @vcMsgContents = @vcMsgContents 	+'  DK모바일 디 오리진 시즌3<br />'
+			SET @vcMsgContents = @vcMsgContents 	+'  인게임 쿠폰팩이 도착했습니다.<br /><br />'
+			SET @vcMsgContents = @vcMsgContents 	+'  쿠폰 번호<br />'
+			SET @vcMsgContents = @vcMsgContents 	+'  ' + @vcPinCode + '<br /><br />'
+			SET @vcMsgContents = @vcMsgContents 	+'  DK모바일 디 오리진 게임 내에서<br />'
+			SET @vcMsgContents = @vcMsgContents 	+'  쿠폰 번호를 등록 해주시기 바랍니다.<br /><br />'
+		
+			SET @vcMsgContents = @vcMsgContents 	+'  </td></tr></table>'
+
+			EXEC ibmessage.ibmessage.dbo.up_Message_AddMessage @vcMemberID, 'itemBay', @vcMsgSubject, @vcMsgContents, 15, @vcMsgShort, 0, 1
+		END
+
+		SET @iReturn = @iLoop
+
+		SET XACT_ABORT OFF;
+		SET NOCOUNT OFF;
+	END TRY
+
+	BEGIN CATCH
+		IF( XACT_STATE() <> 0)  ROLLBACK TRAN
+
+		IF @err < 60000
+			EXECUTE dbo.up_ErrorCollector_AddSPErrorLog @err,@iReturn OUTPUT;
+		ELSE
+			SET  @iReturn = -@err
+		
+		SET XACT_ABORT OFF;
+		SET NOCOUNT OFF;
+		RETURN
+	END CATCH
+END
+
+
+완료 시간: 2023-02-22T19:11:25.3557818+09:00

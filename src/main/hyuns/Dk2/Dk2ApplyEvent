@@ -1,0 +1,82 @@
+디케이 2 쿼리
+
+
+CREATE PROCEDURE [dbo].[up_Event_202209DKSeason2_ApplyEvent]
+	  @iEventCode		INT								-- 이벤트코드(1383)
+	, @vcMemberID		VARCHAR(13)						-- 접속자ID
+	, @vcMobileNumber	VARCHAR(13)						-- 휴대전화번호
+	, @tiPlatform		TINYINT							-- 플랫폼구분(1:web,2:모바일)
+	, @iReturn			INT	OUTPUT						-- 결과값 반환
+AS
+BEGIN
+	BEGIN TRY
+		SET NOCOUNT ON;
+		SET XACT_ABORT ON;
+
+		DECLARE @err INT, @tiUse TINYINT
+		DECLARE @dtNowDate DATETIME, @dtStartDate DATETIME, @dEndDate DATETIME
+
+		SET @tiUse = 1 -- 0: 비로그인 1: 로그인
+
+		SET @dtNowDate	= GETDATE()
+		SET @iReturn	= -1
+		SET @err		= -1
+
+		-- 이벤트 기간 조회
+		SELECT @dtStartDate = dtStartDate, @dEndDate = dEndDate
+		FROM dbo.tbEvent WITH(NOLOCK)
+		WHERE iEventCode = @iEventCode
+
+		-- 이벤트 기간 확인
+		IF @dtNowDate < @dtStartDate OR @dtNowDate > @dEndDate
+		BEGIN
+			SET @iReturn = -60001
+			SET XACT_ABORT OFF;
+			SET NOCOUNT OFF;
+			RETURN
+		END
+
+		--참여여부 확인
+		IF EXISTS (SELECT iSeq FROM dbo.tbEventApplyMemberList WITH(NOLOCK) WHERE iEventCode = @iEventCode AND vcLogType = @vcMobileNumber)
+		BEGIN
+			SET @iReturn = -60002
+			SET XACT_ABORT OFF;
+			SET NOCOUNT OFF;
+			RETURN
+		END
+
+		IF(@vcMemberID IS NULL OR @vcMemberID = '')
+		BEGIN
+			SET @vcMemberID = 'NoData'
+			SET @tiUse = 0
+		END
+
+		--참여
+		INSERT dbo.tbEventApplyMemberList (iEventCode, vcMemberID, tiUse, vcLogType, tiPlatform, dtRegDate)
+		VALUES (@iEventCode, @vcMemberID, @tiUse, @vcMobileNumber, @tiPlatform, @dtNowDate)
+
+		IF @@ROWCOUNT < 1 OR @@ERROR <> 0
+		BEGIN
+			SET @err = 60003
+			RAISERROR('up_Event_202209DKSeason2_ApplyEvent INSERT Error', 11, 1);
+		END
+
+		SET @iReturn = 0
+
+		SET XACT_ABORT OFF;
+		SET NOCOUNT OFF;
+		RETURN
+	END TRY
+
+	BEGIN CATCH
+		IF( XACT_STATE() <> 0)  ROLLBACK TRAN
+
+		IF @err < 60000
+			EXECUTE dbo.up_ErrorCollector_AddSPErrorLog @err,@iReturn OUTPUT;
+		ELSE
+			SET @iReturn = -@err
+
+		SET XACT_ABORT OFF;
+		SET NOCOUNT OFF;
+	END CATCH
+END

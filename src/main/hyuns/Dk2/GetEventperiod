@@ -1,0 +1,55 @@
+Text
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+/************************************************************************
+Name :  up_Event_Common_GetEvtPeriodCheck
+Auth :	yskwon
+Date :	2022.05.17
+Desc :	공통 이벤트 기간 조회
+
+DECLARE @iReturn INT
+EXEC up_Event_Common_GetEvtPeriodCheck 1362, @iReturn OUTPUT
+SELECT @iReturn
+************************************************************************/
+CREATE PROCEDURE [dbo].[up_Event_Common_GetEvtPeriodCheck]
+	@iEventCode		INT
+	, @iReturn		INT		OUTPUT
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	DECLARE @dtNowDate DATETIME, @dtStartDate DATETIME, @dEndDate DATETIME
+
+	SET @dtNowDate = GETDATE()
+	SET @iReturn = 0
+
+	-- 이벤트 존재 여부 확인
+	IF NOT EXISTS ( SELECT iEventCode
+					FROM dbo.tbEvent WITH(NOLOCK)
+					WHERE iEventCode = @iEventCode )
+	BEGIN
+		SET @iReturn = -60001
+	END
+
+	-- 이벤트 날짜 확인
+	SELECT @dtStartDate = dtStartDate, @dEndDate = dEndDate
+	FROM dbo.tbEvent WITH(NOLOCK)
+	WHERE iEventCode = @iEventCode
+
+	-- 시작날짜 확인
+	IF @dtNowDate < @dtStartDate
+	BEGIN
+		SET @iReturn = -60002
+	END
+
+	-- 종료날짜 확인
+	IF @dtNowDate > @dEndDate
+	BEGIN
+		SET @iReturn = -60003
+	END
+
+	SET NOCOUNT OFF;
+	RETURN
+END
+
+
+완료 시간: 2023-02-22T19:10:03.2976139+09:00

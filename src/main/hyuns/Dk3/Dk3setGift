@@ -1,0 +1,123 @@
+Text
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+/***************************************************************************************************
+Name :  up_Event_202212DKSeason3_SetGiftPackage
+Auth :	jwson
+Date :	2022-12-15
+Desc :  DK모바일 디 오리진 시즌3 오픈 프로모션 - 베이 패키지 받기
+
+--프로시저 테스트
+DECLARE @iReturn int
+exec up_Event_202212DKSeason3_SetGiftPackage 1392, 'sjwan794', 1, @iReturn OUTPUT
+SELECT @iReturn
+
+--권한설정
+GRANT EXEC ON up_Event_202212DKSeason3_SetGiftPackage TO ibWebAP
+GRANT EXEC ON up_Event_202212DKSeason3_SetGiftPackage TO ibDevRw
+***************************************************************************************************/
+CREATE PROCEDURE [dbo].[up_Event_202212DKSeason3_SetGiftPackage]
+	  @iEventCode		INT						-- 이벤트코드(1392)
+	, @vcMemberID		VARCHAR(12)				-- 접속자ID
+	, @tiPlatform		TINYINT					-- 플랫폼구분(1:web, 2:모바일)
+	, @iReturn			INT	OUTPUT				-- 결과값 반환
+AS
+BEGIN
+	BEGIN TRY
+		SET NOCOUNT ON;
+		SET XACT_ABORT ON;
+
+		DECLARE @dtNowDate DATETIME, @dtStartDate DATETIME, @dEndDate DATETIME
+		DECLARE @iReferenceSeq INT
+		DECLARE @err INT
+
+		SET @dtNowDate = GETDATE()
+		SET @iReferenceSeq = -1
+		SET @iReturn = -1
+		SET @err = -1
+
+		-- 이미 받았는지 확인
+		IF EXISTS ( SELECT vcMemberID
+					FROM dbo.tbEventApplyMemberList WITH(NOLOCK)
+					WHERE iEventCode = @iEventCode
+					AND vcMemberID = @vcMemberID
+					AND iGiftCode = 4)
+		BEGIN
+			SET @err = 60001
+			RAISERROR('up_Event_202212DKSeason3_SetGiftPackage - Already get Coupon Error', 11, 1, @err)
+		END
+
+		-- 이벤트 기간 조회
+		SELECT @dtStartDate = dtStartDate, @dEndDate = dEndDate
+		FROM dbo.tbEvent WITH(NOLOCK)
+		WHERE iEventCode = @iEventCode
+
+		-- 이벤트 기간 확인
+		IF @dtNowDate < @dtStartDate OR @dtNowDate > @dEndDate
+		BEGIN
+			SET @err = 60002
+			RAISERROR('up_Event_202212DKSeason3_SetGiftPackage - Not an event period. Error', 11, 1, @err)
+		END
+
+		BEGIN TRAN
+			-- 거래패키지 지급
+			-- 1. 1000원 쿠폰 발급 tiSaveType = 6 (이벤트) : 이벤트 / 쿠폰번호 : 3838
+			EXEC dbo.up_Coupon_AddCouponByAdmin @vcMemberID, 3838, 6, NULL, NULL, 'itembay', @iReferenceSeq OUTPUT
+
+			IF @iReferenceSeq <= 0
+			BEGIN
+				SET @err = 60003 -- 할인쿠폰 1,000 발급 실패
+				RAISERROR('3303 up_Coupon_AddCouponByAdmin EXECUTE Error', 11, 1)
+			END
+
+			-- 2. 3000원 쿠폰 발급 tiSaveType = 6 (이벤트) : 이벤트 / 쿠폰번호 : 3839
+			EXEC dbo.up_Coupon_AddCouponByAdmin @vcMemberID, 3839, 6, NULL, NULL, 'itembay', @iReferenceSeq OUTPUT
+
+			IF @iReferenceSeq <= 0
+			BEGIN
+				SET @err = 60004 -- 할인쿠폰 3,000 발급 실패
+				RAISERROR('3304 up_Coupon_AddCouponByAdmin EXECUTE Error', 11, 1)
+			END
+
+			-- 3. 5000원 쿠폰 발급 tiSaveType = 6 (이벤트) : 이벤트 / 쿠폰번호 : 3840
+			EXEC dbo.up_Coupon_AddCouponByAdmin @vcMemberID, 3840, 6, NULL, NULL, 'itembay', @iReferenceSeq OUTPUT
+
+			IF @iReferenceSeq <= 0
+			BEGIN
+				SET @err = 60005 -- 할인쿠폰 5,000 발급 실패
+				RAISERROR('3305 up_Coupon_AddCouponByAdmin EXECUTE Error', 11, 1)
+			END
+
+			-- 4. 패키지 받은 이력 저장 ( 참조 시퀀스는 기프트핀테이블의 시퀀스 )
+			INSERT dbo.tbEventApplyMemberList (iEventCode, vcMemberID, tiUse, dtRegDate, iGiftCode, tiApplyType, tiPlatform,  vcGiftName)
+			VALUES (@iEventCode, @vcMemberID, 1, @dtNowDate, 4, 3, @tiPlatform,  '베이 패키지 지급')
+
+			IF @@ROWCOUNT < 1 OR @@ERROR <> 0
+			BEGIN
+				SET @err = 60006
+				RAISERROR('up_Event_202212DKSeason3_SetGiftPackage - tbEventApplyMemberList INSERT Error', 11, 1, @err)
+			END
+		COMMIT TRAN
+
+		SET @iReturn = 0
+
+		SET XACT_ABORT OFF;
+		SET NOCOUNT OFF;
+		RETURN
+	END TRY
+
+	BEGIN CATCH
+		IF( XACT_STATE() <> 0)  ROLLBACK TRAN
+
+		IF @err < 60000
+			EXECUTE dbo.up_ErrorCollector_AddSPErrorLog @err,@iReturn OUTPUT;
+		ELSE
+			SET  @iReturn = -@err
+
+		SET XACT_ABORT OFF;
+		SET NOCOUNT OFF;
+		RETURN
+	END CATCH
+END
+
+
+완료 시간: 2023-02-22T19:10:36.6239925+09:00

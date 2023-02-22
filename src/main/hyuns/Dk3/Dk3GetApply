@@ -1,0 +1,36 @@
+Text
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+/************************************************************************
+Name :  up_Event_202212DKSeason3_GetApplyStatus
+Auth :	jwson
+Date :	2022.12.20
+Desc :  DK모바일 디 오리진 시즌3 오픈 프로모션 - 사용자 정보 조회
+
+EXEC up_Event_202212DKSeason3_GetApplyStatus 1392, 'sjwan794'
+
+--권한설정
+GRANT EXEC ON up_Event_202212DKSeason3_GetApplyStatus TO ibWebAP
+GRANT EXEC ON up_Event_202212DKSeason3_GetApplyStatus TO ibDevRw
+************************************************************************/
+CREATE PROCEDURE [dbo].[up_Event_202212DKSeason3_GetApplyStatus]
+	  @iEventCode		INT						-- 이벤트코드(1392)
+	, @vcMemberID		VARCHAR(12)				-- 접속자ID
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	DECLARE @iFlorin INT = 0
+
+	SELECT @iFlorin = iCount
+	FROM dbo.tbEventEntryMemberList WITH(NOLOCK)
+	WHERE iEventCode = @iEventCode
+	AND vcMemberID = @vcMemberID
+
+	SELECT @iFlorin AS 'iFlorin'
+
+	SET NOCOUNT OFF;
+	RETURN
+END
+
+
+완료 시간: 2023-02-22T19:12:30.8892910+09:00
